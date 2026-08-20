@@ -76,6 +76,10 @@ func (c *setCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) s
 		fmt.Fprintln(os.Stderr, "set: a non-zero id is required")
 		return subcommands.ExitFailure
 	}
+	if err = stageAddPlain(&stage, &n); err != nil {
+		fmt.Fprintln(os.Stderr, "set: while expanding input:", err)
+		return subcommands.ExitFailure
+	}
 
 	db, err := c.cfg.open()
 	if err != nil {
@@ -93,6 +97,38 @@ func (c *setCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) s
 
 	fmt.Fprintln(c.cfg.output, n.ID)
 	return subcommands.ExitSuccess
+}
+
+// stageAddPlain expands stage to include the note described by p and all of
+// its contents.
+//
+// The note maps storage backends represent notes with a value, an optional
+// value type, and a sequence of contents, so only those aspects of p are
+// turned into operations. Content notes without an ID cannot be stored and are
+// skipped.
+func stageAddPlain(stage *note.Stage, p *note.Plain) error {
+	stn := stage.Note(p.ID)
+	if p.ValueString != "" || p.ValueType != nil {
+		var vt note.ID
+		if p.ValueType != nil {
+			vt = p.ValueType.ID
+		}
+		if err := stn.SetValue(p.ValueString, vt); err != nil {
+			return err
+		}
+	}
+	for _, c := range p.Contents {
+		if c.ID == note.EmptyID {
+			continue
+		}
+		if err := stageAddPlain(stage, c); err != nil {
+			return err
+		}
+		if _, err := stn.AddContent(c.ID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func init() {
